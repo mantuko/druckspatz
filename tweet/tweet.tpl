@@ -23,6 +23,12 @@
 			#info_text {
 				margin: 0 0 0 4px;
 			}
+			#avatar {
+				width: 45px;
+				height: 45px;
+				-webkit-border-radius: 15%;
+				overflow: hidden;
+			}
 			#name {
 				font-size: 1.1em;
 			}
