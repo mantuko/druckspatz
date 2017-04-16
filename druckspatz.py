@@ -7,13 +7,8 @@ string occurs the tweet gets printed via the standard printer on a unix system.
 
 # sys to access command line arguments
 import sys
-# Import the necessary methods from tweepy library to acces twitter's api
-import tweepy
-from tweepy.streaming import StreamListener
-from tweepy import OAuthHandler
-from tweepy import Stream
-# JSON to handle the json response
-import json
+# Import library to access twitter's API
+from TwitterAPI import TwitterAPI
 # DateTime to correctly format the date
 import datetime
 from datetime import date
@@ -27,8 +22,7 @@ import subprocess
 import twitter_cfg as cfg
 
 
-# This is a basic listener that just prints received tweets to stdout.
-class StdOutListener(StreamListener):
+class tweetPrinter():
     def __init__(self):
         self.templateLoader = jinja2.FileSystemLoader(searchpath="tweet")
         self.templateEnv = jinja2.Environment(loader=self.templateLoader)
@@ -43,7 +37,7 @@ class StdOutListener(StreamListener):
         }
 
     def on_data(self, data):
-        tweet = json.loads(data)
+        tweet = data
         tweet_time = datetime.date.fromtimestamp(int(tweet["timestamp_ms"])//1000)
         templateVars = {
             'avatar' : tweet['user']['profile_image_url_https'],
@@ -59,16 +53,16 @@ class StdOutListener(StreamListener):
 
     def on_error(self, status):
         print(status)
-    
+
     def render_html(self, templateVars):
         html_file = open('tweet/tweet.html', 'w')
         html = self.template.render(templateVars)
         html_file.write(html)
-    
+
     def convert_html_2_pdf(self):
         pdfkit.from_file('tweet/tweet.html', \
-        	'/home/pi/druckspatz/tweet/tweet.pdf', options=self.pdf_options)
-    
+                '/home/pi/druckspatz/tweet/tweet.pdf', options=self.pdf_options)
+
     def print_pdf(self):
         subprocess.run(["/usr/bin/lpr", "tweet/tweet.pdf"])
 
@@ -76,26 +70,42 @@ class StdOutListener(StreamListener):
 if __name__ == '__main__':
 
     # This handles Twitter authetification and the connection to Twitter Streaming API
-    l = StdOutListener()
-    auth = OAuthHandler(cfg.consumer_key, cfg.consumer_secret)
-    auth.set_access_token(cfg.access_token, cfg.access_token_secret)
-    stream = Stream(auth, l)
-    
+    p = tweetPrinter()
+    api = TwitterAPI(cfg.consumer_key,
+            cfg.consumer_secret,
+            cfg.access_token,
+            cfg.access_token_secret)
+
     # Remove first element from argv list
     args = sys.argv
     args.pop(0)
-    
+
     # If no search tearm is given just exit
     if len(args) == 0:
         print("Search parameters are missing.\nUsage: python3 druckspatz.py '#tag' <<searchTerm> ...>.\nTerms starting with '#' have to be escaped by '.")
         sys.exit()
 
-    # This line filters Twitter Streams to capture data by the keywords: '#nochNtest'
-    # 
-    # In the JSON-Response one can access
-    # the text via 'text',
-    # the user name via 'user' -> 'screen_name'
-    # the users name via 'user' -> 'name'
-    # the profile image via 'user' -> profile_image_url(_https)
-    # the timestamp via 'timestamp_ms' (comes as a string)
-    stream.filter(track=args)
+    while True:
+        try:
+            iterator = api.request('statuses/filter', {'track':args}).get_iterator()
+            for item in iterator:
+                if 'text' in item:
+                    p.on_data(item)
+                elif 'disconnect' in item:
+                    event = item['disconnect']
+                    if event['code'] in [2,5,6,7,]:
+                        # something needs to be fixed before re-conneting
+                        raise Exception(event['reason'])
+                    else:
+                        # temporary interruption, re-try request
+                        break
+        except TwitterRequestError as e:
+            if e.status_code < 500:
+                # something needs to be fixed before re-conneting
+                raise
+            else:
+                # temporary interruption, re-try request
+                pass
+        except TwitterConnectionError:
+            # temporary interruption, re-try request
+            pass
